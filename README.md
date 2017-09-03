@@ -34,6 +34,7 @@ TODO:
 - [x] Loss / Optimization of wake phase.
 - [x] Loss / Optimization of sleep phase.
 - [x] Include real data (MNIST?).
+- [ ] Include fashion data.
 - [x] Visualize generated digits.
 - [x] Explore latent space. (albeit very hacky)
 - [x] Plot loss.
