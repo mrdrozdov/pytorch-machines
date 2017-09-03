@@ -12,6 +12,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
+from torch.nn.parameter import Parameter
+import torch.optim as optim
 
 import gflags
 
@@ -51,7 +53,7 @@ class HelmholtzMachine(nn.Module):
         for ii, i in enumerate(range(self.num_layers)[::-1]):
             self.set_g(ii, nn.Linear(self.layers[i+1], self.layers[i]))
 
-        self.g_bias = nn.Parameter(torch.FloatTensor(self.layers[-1]))
+        self.g_bias = Parameter(torch.FloatTensor(self.layers[-1]))
 
         self.reset_parameters()
 
@@ -85,7 +87,7 @@ class HelmholtzMachine(nn.Module):
         otherwise simply round x, giving binary output in either case.
         """
         if training:
-            out = torch.bernoulli(x)
+            out = torch.bernoulli(x).detach()
         else:
             out = torch.round(x)
         return out
@@ -170,30 +172,53 @@ def fake_data_iterator(batch_size=3, size=784):
 
 def main():
     gflags.DEFINE_boolean("verbose", False, "Set to True for additional log output.")
-    gflags.DEFINE_integer("max_iterations", 100, "Number of total training steps.")
-    gflags.DEFINE_integer("batch_size", 3, "Batch size.")
+    gflags.DEFINE_integer("max_iterations", 1000, "Number of total training steps.")
+    gflags.DEFINE_integer("batch_size", 16, "Batch size.")
+    gflags.DEFINE_integer("log_every", 100, "Batch size.")
+    gflags.DEFINE_float("learning_rate", 0.01, "Learning rate.")
 
     FLAGS(sys.argv)
 
     iterations = FLAGS.max_iterations
     it = fake_data_iterator(batch_size=FLAGS.batch_size)
+    log_every = FLAGS.log_every
 
     model = HelmholtzMachine()
 
     print(model)
 
+    opt = optim.Adam(model.parameters(), lr=FLAGS.learning_rate)
     model.set_verbose(FLAGS.verbose)
 
     model.train()
     for step in range(iterations):
-        print("Step: {}".format(step))
-
+        
         model.wake()
         recognition_outputs, generative_loss = model.forward(next(it))
 
         model.sleep()
         recognition_loss, generative_outputs = model.forward(next(it))
 
+        total_loss = 0.0
+        for i, loss in enumerate(generative_loss):
+            total_loss += loss
+        for i, loss in enumerate(recognition_loss):
+            total_loss += loss
+
+        opt.zero_grad()
+        total_loss.backward()
+        opt.step()
+
+        if step % log_every == 0:
+            print("Step: {}".format(step))
+            sys.stdout.write("\n")
+            for i, loss in enumerate(generative_loss):
+                print("\tgenerative loss", i, loss.data[0])
+            for i, loss in enumerate(recognition_loss):
+                print("\trecognition loss", i, loss.data[0])
+            sys.stdout.write("\n")
+            print("\ttotal loss", total_loss.data[0])
+            sys.stdout.write("\n")
 
 
 if __name__ == '__main__':

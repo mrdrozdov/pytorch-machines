@@ -23,6 +23,6 @@ TODO:
 
 - [x] Forward pass of wake phase.
 - [x] Forward pass of sleep phase.
-- [ ] Loss / Optimization of wake phase.
-- [ ] Loss / Optimization of sleep phase.
+- [x] Loss / Optimization of wake phase.
+- [x] Loss / Optimization of sleep phase.
 - [ ] Include real data (MNIST?).
