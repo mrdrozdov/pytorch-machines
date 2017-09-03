@@ -35,7 +35,7 @@ TODO:
 - [x] Loss / Optimization of sleep phase.
 - [x] Include real data (MNIST?).
 - [x] Visualize generated digits.
-- [ ] Explore latent space.
+- [x] Explore latent space. (albeit very hacky)
 - [x] Plot loss.
 - [ ] Incorporate KL Divergence.
 - [ ] Incorporate distributions.

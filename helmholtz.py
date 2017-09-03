@@ -8,6 +8,8 @@ import numpy
 
 import os
 import sys
+import random
+import itertools
 
 import torch
 import torch.nn as nn
@@ -34,20 +36,12 @@ FLAGS = gflags.FLAGS
 class HelmholtzMachine(nn.Module):
     """
     A Helmholtz machine trained with the Wake Sleep algorithm.
-
-    r0 : 784 x 100
-    r1 : 100 x 10
-
-    gbias : 10
-    g0 : 10 x 100
-    g1 : 100 x 784
-
     """
 
     _awake = True
     _verbose = True
 
-    def __init__(self, layers=[784, 100, 10]):
+    def __init__(self, layers=[784, 128, 32]):
         super(HelmholtzMachine, self).__init__()
 
         assert len(layers) >= 3, "We require at least two sets of weights. |I| = 1, |J| >= 1, |K| = 1"
@@ -223,6 +217,35 @@ class Logger(object):
         toshow = x.cpu().data.view(-1, 28, 28).numpy()
         self.vis.images(numpy.split(toshow, toshow.shape[0]))
 
+    def visualize_latent_space(self, model):
+        if not self.using_visdom:
+            return
+
+        K = 8
+
+        x_base = model.g_bias.view(1, -1)
+        x_base = F.sigmoid(x_base).round()
+        x_base = x_base.data
+        inputs = []
+
+        model.eval()
+        kk_both = random.sample(range(x_base.size(1)), k=K*2-1)
+        kk1, kk2 = kk_both[:K], kk_both[K:]
+        for i in range(K):
+            x_new = x_base.clone()
+            for ii in range(i+1):
+                x_new[0, kk1[ii]] -= 1
+                x_new = x_new.abs()
+            for jj in range(K-1):
+                x_new[0, kk2[jj]] -= 1
+                x_new = x_new.abs()
+                inputs.append(x_new.clone())
+
+        inputs = Variable(torch.cat(inputs, 0))
+        outputs = model._run_sleep_generation(inputs)
+        toshow = outputs[-1].cpu().data.view(-1, 28, 28).numpy()
+        self.vis.images(numpy.split(toshow, toshow.shape[0]))
+
     def _log(self, step, key, val):
         prevX, prevY, win, update = self.prev_dict.get(key, (0, 0, None, None))
         X = numpy.array([prevX, step])
@@ -282,8 +305,8 @@ def main():
     opt = optim.Adam(model.parameters(), lr=FLAGS.learning_rate)
     model.set_verbose(FLAGS.verbose)
 
-    model.train()
     for step in range(iterations):
+        model.train()
         
         model.wake()
         recognition_outputs, generation_bias_loss, generative_loss = model.forward(next(it))
@@ -315,7 +338,8 @@ def main():
             sys.stdout.write("\n")
 
         if vis_every > 0 and step % vis_every == 0:
-            logger.visualize(generative_outputs[-1])
+            # logger.visualize(generative_outputs[-1])
+            logger.visualize_latent_space(model)
 
         if plot_every > 0 and step % plot_every == 0:
             logger.log(step, generation_bias_loss, generative_loss, recognition_loss, total_loss)
