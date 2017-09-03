@@ -102,70 +102,101 @@ class HelmholtzMachine(nn.Module):
             out = torch.round(x)
         return out
 
-    def run_wake(self, x):
-        batch_size = x.size(0)
-        recognition_outputs = []
-        generation_loss = []
+    def _run_wake_recognition(self, x):
+        results = []
 
-        recognition_outputs.append(x)
-
-        # First run recognition layers, saving stochastic outputs.
+        # Run recognition layers, saving stochastic outputs.
         for i in range(self.num_layers):
             x = self.r(i)(x)
             x = F.sigmoid(x)
             x = self.layer_output(x, self.training)
-            recognition_outputs.append(x)
-            if self._verbose:
-                print("wake", "r", i, x)
+            results.append(x)
+
+        return results
+
+    def _run_wake_generation(self, x_original, recognition_outputs):
+        results = []
+
+        # Run generative layers, predicting the input to each layer.
+        for i in range(self.num_layers):
+            x_input = recognition_outputs[-(i+1)]
+            if i == self.num_layers - 1:
+                x_target = x_original
+            else:
+                x_target = recognition_outputs[-(i+2)]
+            x = self.g(i)(x_input)
+            x = F.sigmoid(x)
+            results.append(nn.BCELoss()(x, x_target))
+
+        return results
+
+    def run_wake(self, x):
+        x_first = x
+        batch_size = x.size(0)
+
+        # Run Recognition Net.
+        recognition_outputs = self._run_wake_recognition(x)
 
         # Fit the bias to the final layer.
         x_last = recognition_outputs[-1]
         x = self.g_bias.view(1, -1).expand(batch_size, self.g_bias.size(0))
         x = F.sigmoid(x)
-        generation_loss.append(nn.BCELoss()(x, x_last))
+        generation_bias_loss = nn.BCELoss()(x, x_last)
 
-        # Then run generative layers, predicting the input to each layer.
+        # Run Generation Net.
+        generation_loss = self._run_wake_generation(x_first, recognition_outputs)
+
+        return recognition_outputs, generation_bias_loss, generation_loss
+
+    def _run_sleep_recognition(self, x_initial, generative_outputs):
+        results = []
+
+        # Run recognition layers to predict fantasies.
         for i in range(self.num_layers):
-            # TODO: Right now, only considers the recognition outputs, but should
-            # have the ability to reuse generative outputs.
-            x_input = recognition_outputs[-(i+1)]
-            x_target = recognition_outputs[-(i+2)]
-            x = self.g(i)(x_input)
+            x_input = generative_outputs[-(i+1)]
+            if i == self.num_layers - 1:
+                x_target = x_initial
+            else:
+                x_target = generative_outputs[-(i+2)]
+            x = self.r(i)(x_input)
             x = F.sigmoid(x)
-            generation_loss.append(nn.BCELoss()(x, x_target))
+            results.append(nn.BCELoss()(x, x_target))
 
-        return recognition_outputs, generation_loss
+        return results
+
+    def _run_sleep_generation(self, x_initial):
+        results = []
+
+        # Fantasize each layers output.
+        for i in range(self.num_layers):
+            if i == 0:
+                x = self.g(i)(x_initial)
+            else:
+                x = self.g(i)(x)
+            x = F.sigmoid(x)
+            x = self.layer_output(x, self.training)
+            results.append(x)
+
+        return results
 
     def run_sleep(self, x):
         batch_size = x.size(0)
         recognition_loss = []
-        generative_outputs = []
 
         # We do not use the input `x`, rather we use the bias.
         bias = self.g_bias.view(1, -1)
         x = F.sigmoid(bias)
         x = x.expand(batch_size, self.g_bias.size(0))
         x = self.layer_output(x, self.training)
-        generative_outputs.append(x)
+        generation_bias_output = x
 
-        # First fantasize each layers output.
-        for i in range(self.num_layers):
-            x = self.g(i)(x)
-            x = F.sigmoid(x)
-            x = self.layer_output(x, self.training)
-            generative_outputs.append(x)
-            if self._verbose:
-                print("sleep", "g", i, x)
+        # Fantasize each layers output.
+        generative_outputs = self._run_sleep_generation(generation_bias_output)
 
-        # Then run recognition layers to predict fantasies.
-        for i in range(self.num_layers):
-            x_input = generative_outputs[-(i+1)]
-            x_target = generative_outputs[-(i+2)]
-            x = self.r(i)(x_input)
-            x = F.sigmoid(x)
-            recognition_loss.append(nn.BCELoss()(x, x_target))
+        # Run recognition layers to predict fantasies.
+        recognition_loss = self._run_sleep_recognition(generation_bias_output, generative_outputs)
 
-        return recognition_loss, generative_outputs
+        return recognition_loss, generation_bias_output, generative_outputs
         
     def forward(self, x):
         if self._awake:
@@ -200,10 +231,11 @@ class Logger(object):
         win = self.vis.line(X=X, Y=Y, win=win, opts=opts, update=update)
         self.prev_dict[key] = (step, val, win, 'append')
 
-    def log(self, step, generative_loss, recognition_loss, total_loss):
+    def log(self, step, generation_bias_loss, generative_loss, recognition_loss, total_loss):
         if not self.using_visdom:
             return
 
+        self._log(step, 'gbias', generation_bias_loss.data[0])
         for i, loss in enumerate(generative_loss):
             self._log(step, 'g_{}'.format(i), loss.data[0])
         for i, loss in enumerate(recognition_loss):
@@ -254,12 +286,13 @@ def main():
     for step in range(iterations):
         
         model.wake()
-        recognition_outputs, generative_loss = model.forward(next(it))
+        recognition_outputs, generation_bias_loss, generative_loss = model.forward(next(it))
 
         model.sleep()
-        recognition_loss, generative_outputs = model.forward(next(it))
+        recognition_loss, generation_bias_output, generative_outputs = model.forward(next(it))
 
         total_loss = 0.0
+        total_loss += generation_bias_loss
         for i, loss in enumerate(generative_loss):
             total_loss += loss
         for i, loss in enumerate(recognition_loss):
@@ -272,6 +305,7 @@ def main():
         if step % log_every == 0:
             print("Step: {}".format(step))
             sys.stdout.write("\n")
+            print("\tgeneration_bias_loss", generation_bias_loss.data[0])
             for i, loss in enumerate(generative_loss):
                 print("\tgenerative loss", i, loss.data[0])
             for i, loss in enumerate(recognition_loss):
@@ -284,7 +318,7 @@ def main():
             logger.visualize(generative_outputs[-1])
 
         if plot_every > 0 and step % plot_every == 0:
-            logger.log(step, generative_loss, recognition_loss, total_loss)
+            logger.log(step, generation_bias_loss, generative_loss, recognition_loss, total_loss)
 
 
 if __name__ == '__main__':

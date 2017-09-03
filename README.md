@@ -38,4 +38,5 @@ TODO:
 - [ ] Explore latent space.
 - [x] Plot loss.
 - [ ] Incorporate KL Divergence.
+- [ ] Incorporate distributions.
 - [ ] GPU support.
