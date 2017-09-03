@@ -19,10 +19,18 @@ Bibtex:
 }
 ```
 
+Generated binarized MNIST examples (work in progress):
+
+![](doc/generated_mnist.png)
+
 TODO:
 
 - [x] Forward pass of wake phase.
 - [x] Forward pass of sleep phase.
 - [x] Loss / Optimization of wake phase.
 - [x] Loss / Optimization of sleep phase.
-- [ ] Include real data (MNIST?).
+- [x] Include real data (MNIST?).
+- [x] Visualize generated digits.
+- [ ] Plot loss.
+- [ ] Incorporate KL Divergence.
+- [ ] GPU support.

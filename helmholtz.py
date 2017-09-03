@@ -6,6 +6,7 @@ A Helmholtz machine trained with the Wake Sleep algorithm.
 
 import numpy
 
+import os
 import sys
 
 import torch
@@ -15,7 +16,16 @@ from torch.autograd import Variable
 from torch.nn.parameter import Parameter
 import torch.optim as optim
 
+from torchvision import datasets, transforms
+
 import gflags
+
+
+try:
+    import visdom
+    USING_VISDOM = True
+except:
+    USING_VISDOM = False
 
 
 FLAGS = gflags.FLAGS
@@ -165,23 +175,51 @@ class HelmholtzMachine(nn.Module):
         return out
 
 
-def fake_data_iterator(batch_size=3, size=784):
+class Logger(object):
+
+    def __init__(self, using_visdom=True):
+        self.using_visdom = using_visdom
+
+        if self.using_visdom:
+            self.vis = visdom.Visdom()
+
+    def visualize(self, x):
+        if not self.using_visdom:
+            return
+
+        toshow = x.cpu().data.view(-1, 28, 28).numpy()
+        self.vis.images(numpy.split(toshow, toshow.shape[0]))
+
+
+def data_iterator(batch_size=16):
+    data_loader = torch.utils.data.DataLoader(
+        datasets.MNIST(os.path.expanduser('~/data/mnist'), train=False, transform=transforms.Compose([
+                           transforms.ToTensor(),
+                           lambda x: x.view(-1),  # flatten
+                           lambda x: x.round(),  # binarize
+                           # transforms.Normalize((0.1307,), (0.3081,)),
+                       ])),
+        batch_size=batch_size, shuffle=True)
     while True:
-        yield Variable(torch.from_numpy(numpy.random.randn(batch_size, size)).float())
+        for data, target in data_loader:
+            yield Variable(data)
 
 
 def main():
     gflags.DEFINE_boolean("verbose", False, "Set to True for additional log output.")
-    gflags.DEFINE_integer("max_iterations", 1000, "Number of total training steps.")
+    gflags.DEFINE_integer("max_iterations", 100000, "Number of total training steps.")
     gflags.DEFINE_integer("batch_size", 16, "Batch size.")
-    gflags.DEFINE_integer("log_every", 100, "Batch size.")
+    gflags.DEFINE_integer("log_every", 100, "Log every N steps.")
+    gflags.DEFINE_integer("vis_every", 1000, "Visualize examples every N steps.")
     gflags.DEFINE_float("learning_rate", 0.01, "Learning rate.")
 
     FLAGS(sys.argv)
 
     iterations = FLAGS.max_iterations
-    it = fake_data_iterator(batch_size=FLAGS.batch_size)
+    it = data_iterator(batch_size=FLAGS.batch_size)
     log_every = FLAGS.log_every
+    vis_every = FLAGS.vis_every
+    logger = Logger(USING_VISDOM)
 
     model = HelmholtzMachine()
 
@@ -219,6 +257,9 @@ def main():
             sys.stdout.write("\n")
             print("\ttotal loss", total_loss.data[0])
             sys.stdout.write("\n")
+
+        if step % vis_every == 0:
+            logger.visualize(generative_outputs[-1])
 
 
 if __name__ == '__main__':
