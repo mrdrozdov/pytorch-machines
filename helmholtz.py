@@ -183,12 +183,32 @@ class Logger(object):
         if self.using_visdom:
             self.vis = visdom.Visdom()
 
+        self.prev_dict = dict()
+
     def visualize(self, x):
         if not self.using_visdom:
             return
 
         toshow = x.cpu().data.view(-1, 28, 28).numpy()
         self.vis.images(numpy.split(toshow, toshow.shape[0]))
+
+    def _log(self, step, key, val):
+        prevX, prevY, win, update = self.prev_dict.get(key, (0, 0, None, None))
+        X = numpy.array([prevX, step])
+        Y = numpy.array([prevY, val])
+        opts = dict(legend=[key], title=key, xlabel='Training Steps', ylabel='Loss')
+        win = self.vis.line(X=X, Y=Y, win=win, opts=opts, update=update)
+        self.prev_dict[key] = (step, val, win, 'append')
+
+    def log(self, step, generative_loss, recognition_loss, total_loss):
+        if not self.using_visdom:
+            return
+
+        for i, loss in enumerate(generative_loss):
+            self._log(step, 'g_{}'.format(i), loss.data[0])
+        for i, loss in enumerate(recognition_loss):
+            self._log(step, 'r_{}'.format(i), loss.data[0])
+        self._log(step, 'total', total_loss.data[0])
 
 
 def data_iterator(batch_size=16):
@@ -211,6 +231,7 @@ def main():
     gflags.DEFINE_integer("batch_size", 16, "Batch size.")
     gflags.DEFINE_integer("log_every", 100, "Log every N steps.")
     gflags.DEFINE_integer("vis_every", 1000, "Visualize examples every N steps.")
+    gflags.DEFINE_integer("plot_every", 100, "Plot loss every N steps.")
     gflags.DEFINE_float("learning_rate", 0.01, "Learning rate.")
 
     FLAGS(sys.argv)
@@ -219,6 +240,7 @@ def main():
     it = data_iterator(batch_size=FLAGS.batch_size)
     log_every = FLAGS.log_every
     vis_every = FLAGS.vis_every
+    plot_every = FLAGS.plot_every
     logger = Logger(USING_VISDOM)
 
     model = HelmholtzMachine()
@@ -258,8 +280,11 @@ def main():
             print("\ttotal loss", total_loss.data[0])
             sys.stdout.write("\n")
 
-        if step % vis_every == 0:
+        if vis_every > 0 and step % vis_every == 0:
             logger.visualize(generative_outputs[-1])
+
+        if plot_every > 0 and step % plot_every == 0:
+            logger.log(step, generative_loss, recognition_loss, total_loss)
 
 
 if __name__ == '__main__':

@@ -23,6 +23,10 @@ Generated binarized MNIST examples (work in progress):
 
 ![](doc/generated_mnist.png)
 
+Loss plotted for each layer (including the final layer's "generative bias"):
+
+![](doc/plot_loss.png)
+
 TODO:
 
 - [x] Forward pass of wake phase.
@@ -31,6 +35,7 @@ TODO:
 - [x] Loss / Optimization of sleep phase.
 - [x] Include real data (MNIST?).
 - [x] Visualize generated digits.
-- [ ] Plot loss.
+- [ ] Explore latent space.
+- [x] Plot loss.
 - [ ] Incorporate KL Divergence.
 - [ ] GPU support.
